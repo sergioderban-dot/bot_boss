@@ -487,16 +487,14 @@ async def lifespan(app: FastAPI):
     polling_task.cancel()
     await bot.session.close()
 
-@dp.message(Command("start", "grid"))  # Это уже есть в коде
-...
+# 1. СНАЧАЛА создаем приложение FastAPI
+app = FastAPI(lifespan=lifespan)
 
-# --- ДОБАВЬТЕ ЭТОТ БЛОК ДЛЯ CRON-JOB ---
+# 2. ЗАТЕМ добавляем эндпоинт для Cron-Job (чтобы бот не засыпал)
 @app.get("/")
 async def health_check():
     return {"status": "ok", "message": "Bot is alive!"}
-# --------------------------------------
 
-app = FastAPI(lifespan=lifespan)
-
+# 3. Запуск сервера
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)
