@@ -487,6 +487,15 @@ async def lifespan(app: FastAPI):
     polling_task.cancel()
     await bot.session.close()
 
+@dp.message(Command("start", "grid"))  # Это уже есть в коде
+...
+
+# --- ДОБАВЬТЕ ЭТОТ БЛОК ДЛЯ CRON-JOB ---
+@app.get("/")
+async def health_check():
+    return {"status": "ok", "message": "Bot is alive!"}
+# --------------------------------------
+
 app = FastAPI(lifespan=lifespan)
 
 if __name__ == "__main__":
