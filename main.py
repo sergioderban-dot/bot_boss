@@ -10,17 +10,25 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
-from config import BOT_TOKEN, ADMIN_IDS
+from config import BOT_TOKEN, ADMIN_IDS, DATABASE_NAME
 from database import (
-    init_db, WAVES_DATA, get_wave_slots, get_user_reservations_count, get_user_max_limit,
-    toggle_slot, set_setting, get_setting, reset_all_slots, admin_force_free_slot,
-    get_slot_by_index, add_user_extra_slots, admin_assign_slot
+    init_db, WAVES_DATA, LOCATIONS, LOCATIONS_EMOJI, get_wave_slots, get_user_reservations_count, get_user_max_limit,
+    set_setting, get_setting, reset_all_slots, admin_force_free_slot,
+    get_slot_by_index, add_user_extra_slots, admin_assign_slot, get_taken_bosses,
+    reserve_slot_with_bosses, release_slot
 )
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 
+# Состояния FSM для пошагового визарда выбора боссов
+class SelectionWizard(StatesGroup):
+    selecting_top1 = State()
+    selecting_top2 = State()
+
+
+# Состояние для приема текста/имени от админа
 class AdminStates(StatesGroup):
     waiting_for_custom_user = State()
 
@@ -46,22 +54,28 @@ def build_grid_text(wave_id: int, user_count: int, max_limit: int, slots: list, 
     text += f"📊 <b>Ваши брони:</b> <code>{user_count} / {max_limit}</code>\n\n"
     
     text += f"📌 <b>Как записаться:</b>\n"
-    text += f"1️⃣ <b>Выбери волну</b> (кнопки В1–В4 внизу).\n"
-    text += f"2️⃣ <b>Выбери свободный топ.</b> Цифра выбора на кнопке соответствует номеру строки в таблице ниже.\n"
+    text += f"1. Выбери волну с помощью кнопок В1, В2, В3, В4.\n"
+    text += f"2. Чуть ниже выбери свободный слот (обозначен зелёным).\n"
+    text += f"3. В появившемся списке сначала выбери Т1 босса, затем выбери Т2 босса.\n"
     text += f"═════════════════════════════════════\n"
     text += f"🌊 <b>{wave_info['title']}</b>\n\n"
 
-    text += "<pre>"
     for idx, slot in enumerate(slots):
-        num = f"{idx + 1:>2}."
-        user_raw = slot["username"] if slot["username"] else "🟢 Свободно"
-        
-        user_str = f"{user_raw:<18}"
-        top1_str = f"{slot['top1_boss']:<17}"
-        top2_str = f"{slot['top2_boss']}"
+        num = idx + 1
+        if slot["username"] or slot["user_id"]:
+            user_raw = slot["username"] if slot["username"] else f"ID:{slot['user_id']}"
+            top1_raw = slot["top1_boss"] if slot["top1_boss"] else "Не выбран"
+            top2_raw = slot["top2_boss"] if slot["top2_boss"] else "Не выбран"
+            
+            t1_emoji = LOCATIONS_EMOJI.get(slot["top1_boss"], "")
+            t2_emoji = LOCATIONS_EMOJI.get(slot["top2_boss"], "")
+            
+            top1_str = f"{t1_emoji} {top1_raw}".strip()
+            top2_str = f"{t2_emoji} {top2_raw}".strip()
 
-        text += f"{num} {user_str} │ {top1_str} │ {top2_str}\n"
-    text += "</pre>"
+            text += f"<b>{num}. {user_raw}</b>\n  ├ 🥇 Т1: <i>{top1_str}</i>\n  └ 🥈 Т2: <i>{top2_str}</i>\n\n"
+        else:
+            text += f"<b>{num}. 🟢 Свободно</b>\n\n"
 
     return text
 
@@ -69,12 +83,14 @@ def build_grid_text(wave_id: int, user_count: int, max_limit: int, slots: list, 
 def build_grid_keyboard(active_wave: int, slots: list) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
+    # Переключение волн В1–В4
     wave_buttons = []
     for w in range(1, 5):
         label = f"🔘 В{w}" if w == active_wave else f"В{w}"
         wave_buttons.append(InlineKeyboardButton(text=label, callback_data=f"wave:{w}"))
     builder.row(*wave_buttons)
 
+    # 10 кнопок строк слотов
     buttons = []
     for idx, slot in enumerate(slots):
         if slot["username"]:
@@ -94,6 +110,31 @@ def build_grid_keyboard(active_wave: int, slots: list) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def build_boss_keyboard(wave_id: int, taken_bosses: set, callback_prefix: str, exclude_boss: str = None) -> InlineKeyboardMarkup:
+    """Генерация клавиатуры выбора боссов (разделение Т1 пользователя, занятых боссов и свободных локаций)"""
+    builder = InlineKeyboardBuilder()
+    buttons = []
+    
+    for boss in LOCATIONS:
+        if boss == exclude_boss:
+            buttons.append(InlineKeyboardButton(text=f"🚫 {boss} (Твой Т1)", callback_data="noop_selected"))
+        elif boss in taken_bosses:
+            buttons.append(InlineKeyboardButton(text=f"🔒 {boss} (Занято)", callback_data="noop_taken"))
+        else:
+            emoji = LOCATIONS_EMOJI.get(boss, "🟢")
+            buttons.append(InlineKeyboardButton(text=f"{emoji} {boss}", callback_data=f"{callback_prefix}:{boss}"))
+
+    for i in range(0, len(buttons), 2):
+        builder.row(buttons[i], buttons[i+1])
+
+    if callback_prefix == "wiz_top2":
+        builder.row(InlineKeyboardButton(text="◀️ Назад к ТОП-1", callback_data="wiz_back_top1"))
+    else:
+        builder.row(InlineKeyboardButton(text="◀️ Отмена", callback_data=f"wave:{wave_id}"))
+
+    return builder.as_markup()
+
+
 async def update_dashboard_if_exists():
     chat_id = await get_setting("dashboard_chat_id")
     msg_id = await get_setting("dashboard_message_id")
@@ -106,20 +147,24 @@ async def update_dashboard_if_exists():
                 slots = await get_wave_slots(w)
                 wave_info = WAVES_DATA[w]
                 
-                full_text += f"🌊 <b>{wave_info['title']}</b>\n"
-                full_text += "<pre>"
+                full_text += f"🌊 <b>{wave_info['title']}</b>\n\n"
 
                 for idx, slot in enumerate(slots):
-                    num = f"{idx + 1:>2}."
-                    user_raw = slot["username"] if slot["username"] else "🟢 Свободно"
-                    
-                    user_str = f"{user_raw:<18}"
-                    top1_str = f"{slot['top1_boss']:<17}"
-                    top2_str = f"{slot['top2_boss']}"
+                    num = idx + 1
+                    if slot["username"] or slot["user_id"]:
+                        user_raw = slot["username"] if slot["username"] else f"ID:{slot['user_id']}"
+                        top1_raw = slot["top1_boss"] if slot["top1_boss"] else "Не выбран"
+                        top2_raw = slot["top2_boss"] if slot["top2_boss"] else "Не выбран"
+                        
+                        t1_emoji = LOCATIONS_EMOJI.get(slot["top1_boss"], "")
+                        t2_emoji = LOCATIONS_EMOJI.get(slot["top2_boss"], "")
 
-                    full_text += f"{num} {user_str} │ {top1_str} │ {top2_str}\n"
+                        top1_str = f"{t1_emoji} {top1_raw}".strip()
+                        top2_str = f"{t2_emoji} {top2_raw}".strip()
 
-                full_text += "</pre>\n"
+                        full_text += f"<b>{num}. {user_raw}</b>\n  ├ 🥇 Т1: <i>{top1_str}</i>\n  └ 🥈 Т2: <i>{top2_str}</i>\n\n"
+                    else:
+                        full_text += f"<b>{num}. 🟢 Свободно</b>\n\n"
 
             await bot.edit_message_text(
                 chat_id=int(chat_id),
@@ -174,8 +219,7 @@ async def cmd_setup_dashboard(message: types.Message):
     if not await is_admin(message.from_user.id, message.chat.id):
         await message.answer(
             f"⚠️ <b>Недостаточно прав.</b>\n"
-            f"Ваш Telegram ID: <code>{message.from_user.id}</code>\n\n"
-            f"<i>Добавьте этот ID в ADMIN_IDS в config.py или назначьте администратором группы.</i>",
+            f"Ваш Telegram ID: <code>{message.from_user.id}</code>",
             parse_mode="HTML"
         )
         return
@@ -211,6 +255,16 @@ async def cb_switch_wave(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
+@dp.callback_query(F.data == "noop_taken")
+async def cb_noop_taken(callback: types.CallbackQuery):
+    await callback.answer("🔒 Этот босс уже забронирован другим сокланом в этой волне!", show_alert=True)
+
+
+@dp.callback_query(F.data == "noop_selected")
+async def cb_noop_selected(callback: types.CallbackQuery):
+    await callback.answer("🚫 Этот босс уже выбран вами на шаге ТОП-1!", show_alert=True)
+
+
 @dp.callback_query(F.data.startswith("slot:"))
 async def cb_slot_click(callback: types.CallbackQuery, state: FSMContext):
     _, wave_id_str, row_idx_str = callback.data.split(":")
@@ -224,8 +278,36 @@ async def cb_slot_click(callback: types.CallbackQuery, state: FSMContext):
     slot = await get_slot_by_index(wave_id, row_index)
     is_occupied = bool(slot["username"] or slot["user_id"])
 
-    # 1. АДМИН кликает по СВОБОДНОМУ слоту
-    if admin_flag and not is_occupied:
+    # 1. Если слот ЗАНЯТ:
+    if is_occupied:
+        if admin_flag:
+            target_user = slot["username"] or f"ID:{slot['user_id']}"
+            t1_e = LOCATIONS_EMOJI.get(slot["top1_boss"], "")
+            t2_e = LOCATIONS_EMOJI.get(slot["top2_boss"], "")
+            top1_disp = f"{t1_e} {slot['top1_boss']}".strip() if slot["top1_boss"] else "Не указан"
+            top2_disp = f"{t2_e} {slot['top2_boss']}".strip() if slot["top2_boss"] else "Не указан"
+
+            builder = InlineKeyboardBuilder()
+            builder.row(InlineKeyboardButton(text=f"📢 Тэгнуть гонщика {target_user}", callback_data=f"adm_tag:{wave_id}:{row_index}"))
+            builder.row(InlineKeyboardButton(text=f"❌ Освободить слот #{row_index + 1}", callback_data=f"adm_free:{wave_id}:{row_index}"))
+            builder.row(InlineKeyboardButton(text=f"➕ Начислить +1 бронь игроку {target_user}", callback_data=f"adm_add_bonus:{wave_id}:{target_user}"))
+            builder.row(InlineKeyboardButton(text="◀️ Назад в сетку", callback_data=f"wave:{wave_id}"))
+
+            await callback.message.edit_text(
+                f"⚙️ <b>АДМИН-МЕНЮ УПРАВЛЕНИЯ СЛОТОМ #{row_index + 1}</b>\n\n"
+                f"Занят игроком: <b>{target_user}</b>\n"
+                f"Боссы: <i>{top1_disp} │ {top2_disp}</i>",
+                reply_markup=builder.as_markup(),
+                parse_mode="HTML"
+            )
+            await callback.answer()
+            return
+        else:
+            await callback.answer(f"Слот занят игроком {slot['username']}", show_alert=True)
+            return
+
+    # 2. Если слот СВОБОДЕН и нажимает АДМИН -> меню выбора (На себя / Записать другого)
+    if admin_flag:
         builder = InlineKeyboardBuilder()
         builder.row(
             InlineKeyboardButton(text="👤 На себя", callback_data=f"adm_book_self:{wave_id}:{row_index}"),
@@ -234,62 +316,95 @@ async def cb_slot_click(callback: types.CallbackQuery, state: FSMContext):
         builder.row(InlineKeyboardButton(text="◀️ Назад в сетку", callback_data=f"wave:{wave_id}"))
 
         await callback.message.edit_text(
-            f"⚙️ <b>СЛОТ #{row_index + 1} (Свободен)</b>\n"
-            f"Боссы: <i>{slot['top1_boss']} │ {slot['top2_boss']}</i>\n\n"
-            f"Забронировать на себя или записать другого игрока?",
+            f"⚙️ <b>СЛОТ #{row_index + 1} (Свободен)</b>\n\n"
+            f"Забронировать на себя (через выбор) или записать любого игрока?",
             reply_markup=builder.as_markup(),
             parse_mode="HTML"
         )
         await callback.answer()
         return
 
-    # 2. АДМИН кликает по ЗАНЯТОМУ слоту
-    if admin_flag and is_occupied:
-        target_user = slot["username"] or f"ID:{slot['user_id']}"
-        builder = InlineKeyboardBuilder()
-        builder.row(InlineKeyboardButton(text=f"📢 Тэгнуть гонщика {target_user}", callback_data=f"adm_tag:{wave_id}:{row_index}"))
-        builder.row(InlineKeyboardButton(text=f"❌ Освободить слот #{row_index + 1}", callback_data=f"adm_free:{wave_id}:{row_index}"))
-        builder.row(InlineKeyboardButton(text=f"➕ Начислить +1 бронь игроку {target_user}", callback_data=f"adm_add_bonus:{wave_id}:{target_user}"))
-        builder.row(InlineKeyboardButton(text="◀️ Назад в сетку", callback_data=f"wave:{wave_id}"))
+    # 3. Если слот СВОБОДЕН и нажимает ОБЫЧНЫЙ ПОЛЬЗОВАТЕЛЬ -> Запуск Визарда
+    await start_wizard_top1(callback, state, wave_id, row_index)
 
-        await callback.message.edit_text(
-            f"⚙️ <b>АДМИН-МЕНЮ УПРАВЛЕНИЯ СЛОТОМ #{row_index + 1}</b>\n\n"
-            f"Занят игроком: <b>{target_user}</b>\n"
-            f"Боссы: <i>{slot['top1_boss']} │ {slot['top2_boss']}</i>",
-            reply_markup=builder.as_markup(),
-            parse_mode="HTML"
-        )
-        await callback.answer()
+
+# Запуск Шага 1 Визарда (Выбор ТОП-1)
+async def start_wizard_top1(callback: types.CallbackQuery, state: FSMContext, wave_id: int, row_index: int):
+    user = callback.from_user
+    username = user.username or user.first_name
+    
+    # Проверка лимита броней
+    max_limit = await get_user_max_limit(username)
+    count = await get_user_reservations_count(user.id, username)
+    if count >= max_limit:
+        await callback.answer(f"У вас уже {count}/{max_limit} броней!", show_alert=True)
         return
 
-    # 3. ОБЫЧНЫЙ ПОЛЬЗОВАТЕЛЬ кликает по слоту
-    success, msg, _ = await toggle_slot(wave_id, row_index, user.id, username)
-    await callback.answer(msg, show_alert=True)
+    await state.set_state(SelectionWizard.selecting_top1)
+    await state.update_data(wave_id=wave_id, row_index=row_index)
 
-    if success:
-        max_limit = await get_user_max_limit(username)
-        count = await get_user_reservations_count(user.id, username)
-        slots = await get_wave_slots(wave_id)
+    taken_bosses = await get_taken_bosses(wave_id)
+    reply_markup = build_boss_keyboard(wave_id, taken_bosses, callback_prefix="wiz_top1")
 
-        text = build_grid_text(wave_id, count, max_limit, slots, username)
-        reply_markup = build_grid_keyboard(wave_id, slots)
-
-        try:
-            await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
-        except Exception:
-            pass
-        
-        await update_dashboard_if_exists()
+    await callback.message.edit_text(
+        f"⚔️ <b>ШАГ 1: ВЫБОР БОССА ТОП-1</b>\n"
+        f"🌊 <b>Волна {wave_id}</b> (Слот #{row_index + 1})\n\n"
+        f"👇 <i>Выберите первого доступного босса:</i>\n"
+        f"🔒 — <i>боссы, уже забронированные в этой волне</i>",
+        reply_markup=reply_markup,
+        parse_mode="HTML"
+    )
+    await callback.answer()
 
 
-@dp.callback_query(F.data.startswith("adm_book_self:"))
-async def cb_adm_book_self(callback: types.CallbackQuery):
-    _, wave_id_str, row_idx_str = callback.data.split(":")
-    wave_id, row_index = int(wave_id_str), int(row_idx_str)
+@dp.callback_query(F.data.startswith("wiz_top1:"), SelectionWizard.selecting_top1)
+async def cb_wiz_top1_select(callback: types.CallbackQuery, state: FSMContext):
+    top1_boss = callback.data.split(":", 1)[1]
+    data = await state.get_data()
+    wave_id = data["wave_id"]
+    row_index = data["row_index"]
+
+    await state.update_data(top1_boss=top1_boss)
+    await state.set_state(SelectionWizard.selecting_top2)
+
+    taken_bosses = await get_taken_bosses(wave_id)
+    reply_markup = build_boss_keyboard(wave_id, taken_bosses, callback_prefix="wiz_top2", exclude_boss=top1_boss)
+
+    top1_emoji = LOCATIONS_EMOJI.get(top1_boss, "")
+
+    await callback.message.edit_text(
+        f"⚔️ <b>ШАГ 2: ВЫБОР БОССА ТОП-2</b>\n"
+        f"🌊 <b>Волна {wave_id}</b> (Слот #{row_index + 1})\n"
+        f"1️⃣ <b>Выбран ТОП-1:</b> {top1_emoji} {top1_boss}\n\n"
+        f"👇 <i>Теперь выберите второго доступного босса:</i>",
+        reply_markup=reply_markup,
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "wiz_back_top1", SelectionWizard.selecting_top2)
+async def cb_wiz_back_top1(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    wave_id = data["wave_id"]
+    row_index = data["row_index"]
+    await start_wizard_top1(callback, state, wave_id, row_index)
+
+
+@dp.callback_query(F.data.startswith("wiz_top2:"), SelectionWizard.selecting_top2)
+async def cb_wiz_top2_select(callback: types.CallbackQuery, state: FSMContext):
+    top2_boss = callback.data.split(":", 1)[1]
+    data = await state.get_data()
+    wave_id = data["wave_id"]
+    row_index = data["row_index"]
+    top1_boss = data["top1_boss"]
+
+    await state.clear()
+
     user = callback.from_user
     username = user.username or user.first_name
 
-    success, msg, _ = await toggle_slot(wave_id, row_index, user.id, username)
+    success, msg = await reserve_slot_with_bosses(wave_id, row_index, user.id, username, top1_boss, top2_boss)
     await callback.answer(msg, show_alert=True)
 
     max_limit = await get_user_max_limit(username)
@@ -305,6 +420,13 @@ async def cb_adm_book_self(callback: types.CallbackQuery):
         pass
 
     await update_dashboard_if_exists()
+
+
+@dp.callback_query(F.data.startswith("adm_book_self:"))
+async def cb_adm_book_self(callback: types.CallbackQuery, state: FSMContext):
+    _, wave_id_str, row_idx_str = callback.data.split(":")
+    wave_id, row_index = int(wave_id_str), int(row_idx_str)
+    await start_wizard_top1(callback, state, wave_id, row_index)
 
 
 @dp.callback_query(F.data.startswith("adm_book_other:"))
@@ -324,7 +446,7 @@ async def cb_adm_book_other(callback: types.CallbackQuery, state: FSMContext):
 
     await callback.message.edit_text(
         f"✏️ <b>Введите имя / хэштег / @username</b> для записи в слот #{row_index + 1} (Волна {wave_id}):\n\n"
-        f"<i>Просто отправьте текстовое сообщение в чат бота (например: <code>@Rodion_444</code> или <code>Frozi</code>)</i>",
+        f"<i>Отправьте текстовое сообщение в чат бота (например: <code>@Rodion_444</code> или <code>Frozi</code>)</i>",
         reply_markup=builder.as_markup(),
         parse_mode="HTML"
     )
@@ -346,7 +468,6 @@ async def process_custom_user_input(message: types.Message, state: FSMContext):
     await state.clear()
 
     await message.answer(f"✅ В слот #{row_index + 1} (Волна {wave_id}) успешно записан: <b>{input_text}</b>", parse_mode="HTML")
-
     await update_dashboard_if_exists()
 
 
@@ -367,10 +488,15 @@ async def cb_adm_tag(callback: types.CallbackQuery):
         await callback.answer("В этом слоте нет гонщика для тэга!", show_alert=True)
         return
 
+    t1_e = LOCATIONS_EMOJI.get(slot["top1_boss"], "")
+    t2_e = LOCATIONS_EMOJI.get(slot["top2_boss"], "")
+    top1_disp = f"{t1_e} {slot['top1_boss']}".strip() if slot["top1_boss"] else "Не указан"
+    top2_disp = f"{t2_e} {slot['top2_boss']}".strip() if slot["top2_boss"] else "Не указан"
+
     tag_text = (
         f"📢 {target_user}, вам напоминание по откату боссов!\n"
         f"🌊 <b>Волна {wave_id}</b> (Слот #{row_index + 1})\n"
-        f"🥊 Боссы: <i>{slot['top1_boss']} │ {slot['top2_boss']}</i>"
+        f"🥊 Боссы: <i>{top1_disp} │ {top2_disp}</i>"
     )
 
     thread_id = callback.message.message_thread_id if callback.message.is_topic_message else None
@@ -487,14 +613,18 @@ async def lifespan(app: FastAPI):
     polling_task.cancel()
     await bot.session.close()
 
-# 1. СНАЧАЛА создаем приложение FastAPI
 app = FastAPI(lifespan=lifespan)
 
-# 2. ЗАТЕМ добавляем эндпоинт для Cron-Job (чтобы бот не засыпал)
-@app.get("/")
-async def health_check():
-    return {"status": "ok", "message": "Bot is alive!"}
 
-# 3. Запуск сервера
+# Эндпоинт FastAPI для health-check
+@app.get("/")
+async def root():
+    return {
+        "status": "ok",
+        "service": "Boss Bot Service",
+        "database": DATABASE_NAME
+    }
+
+
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)

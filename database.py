@@ -2,67 +2,38 @@ import aiosqlite
 from datetime import datetime
 from config import DATABASE_NAME
 
+# Единый динамический пул локаций (10 боссов)
+LOCATIONS = [
+    "Немалая смелость",
+    "Хозяин зеркал",
+    "Шайтан-звезда",
+    "Город зеленых книг",
+    "Ведьмин дом",
+    "Ночь в октябре",
+    "Зимняя сказка",
+    "Река чародеев",
+    "Старый лес",
+    "Фермерский домик"
+]
+
+LOCATIONS_EMOJI = {
+    "Немалая смелость": "🦁",
+    "Хозяин зеркал": "🪞",
+    "Шайтан-звезда": "🌠",
+    "Город зеленых книг": "📚",
+    "Ведьмин дом": "🏚",
+    "Ночь в октябре": "🎃",
+    "Зимняя сказка": "❄️",
+    "Река чародеев": "🌊",
+    "Старый лес": "🌲",
+    "Фермерский домик": "🏡"
+}
+
 WAVES_DATA = {
-    1: {
-        "title": "1 ВОЛНА Понедельник - Вторник. Закрытие: Вторник с 19:00 до 21:00 (МСК)",
-        "rows": [
-            {"u": "@Toyota_TruenoAE86", "top1": "Немалая смелость", "top2": "Хозяин зеркал"},
-            {"u": "@Yuzzzabr", "top1": "Шайтан-звезда", "top2": "Город зеленых книг"},
-            {"u": "@sem_Abubakr", "top1": "Ведьмин дом", "top2": "Ночь в октябре"},
-            {"u": "@jittoot", "top1": "Зимняя сказка", "top2": "Ведьмин дом"},
-            {"u": "@danilchet", "top1": "Река чародеев", "top2": "Немалая смелость"},
-            {"u": "@jittoot", "top1": "Старый лес", "top2": "Шайтан-звезда"},
-            {"u": "@Vladislawes", "top1": "Хозяин зеркал", "top2": "Зимняя сказка"},
-            {"u": "@darkhun733r", "top1": "Город зеленых книг", "top2": "Старый лес"},
-            {"u": "@Rodion_444", "top1": "Ночь в октябре", "top2": "Фермерский домик"},
-            {"u": "@FCSMNN152RUS", "top1": "Фермерский домик", "top2": "Река чародеев"}
-        ]
-    },
-    2: {
-        "title": "2 ВОЛНА Среда. Закрытие: Четверг с 12:00 до 14:00 (МСК)",
-        "rows": [
-            {"u": "Frozi", "top1": "Фермерский домик", "top2": "Шайтан-звезда"},
-            {"u": "@Murazavr", "top1": "Хозяин зеркал", "top2": "Река чародеев"},
-            {"u": "@invalid83", "top1": "Река чародеев", "top2": "Ночь в октябре"},
-            {"u": "@TipokSergey", "top1": "Ночь в октябре", "top2": "Ведьмин дом"},
-            {"u": "@nirehcep", "top1": "Немалая смелость", "top2": "Город зеленых книг"},
-            {"u": "@darkhun733r", "top1": "Город зеленых книг", "top2": "Фермерский домик"},
-            {"u": "@Rodion_444", "top1": "Шайтан-звезда", "top2": "Старый лес"},
-            {"u": "@Vladislawes", "top1": "Зимняя сказка", "top2": "Хозяин зеркал"},
-            {"u": "@sergioderban", "top1": "Старый лес", "top2": "Немалая смелость"},
-            {"u": "@sergioderban", "top1": "Ведьмин дом", "top2": "Зимняя сказка"}
-        ]
-    },
-    3: {
-        "title": "3 ВОЛНА Четверг - Пятница. Закрытие: Пятница с 19:00 до 21:00 (МСК)",
-        "rows": [
-            {"u": "Артур Бро", "top1": "Немалая смелость", "top2": "Фермерский домик"},
-            {"u": "@darkhun733r", "top1": "Зимняя сказка", "top2": "Хозяин зеркал"},
-            {"u": "@invalid83", "top1": "Хозяин зеркал", "top2": "Ночь в октябре"},
-            {"u": "@jittoot", "top1": "Фермерский домик", "top2": "Старый лес"},
-            {"u": "@jittoot", "top1": "Ночь в октябре", "top2": "Зимняя сказка"},
-            {"u": "@FCSMNN152RUS", "top1": "Старый лес", "top2": "Река чародеев"},
-            {"u": "@nirehcep", "top1": "Город зеленых книг", "top2": "Немалая смелость"},
-            {"u": "@sem_Abubakr", "top1": "Ведьмин дом", "top2": "Шайтан-звезда"},
-            {"u": "@Yuzzzabr", "top1": "Шайтан-звезда", "top2": "Город зеленых книг"},
-            {"u": "@danilchet", "top1": "Река чародеев", "top2": "Ведьмин дом"}
-        ]
-    },
-    4: {
-        "title": "4 ВОЛНА Суббота. Закрытие: Суббота с 21:00 до 23:00 (МСК)",
-        "rows": [
-            {"u": "@darkhun733r", "top1": "Ночь в октябре", "top2": "Старый лес"},
-            {"u": "@Murazavr", "top1": "Зимняя сказка", "top2": "Город зеленых книг"},
-            {"u": "@Toyota_TruenoAE86", "top1": "Хозяин зеркал", "top2": "Немалая смелость"},
-            {"u": "@TipokSergey", "top1": "Фермерский домик", "top2": "Ведьмин дом"},
-            {"u": "@sergioderban", "top1": "Река чародеев", "top2": "Зимняя сказка"},
-            {"u": "@sergioderban", "top1": "Ведьмин дом", "top2": "Ночь в октябре"},
-            {"u": None, "top1": "Немалая смелость", "top2": "Хозяин зеркал"},
-            {"u": "Артур Бро", "top1": "Город зеленых книг", "top2": "Фермерский домик"},
-            {"u": None, "top1": "Старый лес", "top2": "Шайтан-звезда"},
-            {"u": "Frozi", "top1": "Шайтан-звезда", "top2": "Река чародеев"}
-        ]
-    }
+    1: {"title": "1 ВОЛНА Понедельник - Вторник. Закрытие: Вторник с 19:00 до 21:00 (МСК)"},
+    2: {"title": "2 ВОЛНА Среда. Закрытие: Четверг с 12:00 до 14:00 (МСК)"},
+    3: {"title": "3 ВОЛНА Четверг - Пятница. Закрытие: Пятница с 19:00 до 21:00 (МСК)"},
+    4: {"title": "4 ВОЛНА Суббота. Закрытие: Суббота с 21:00 до 23:00 (МСК)"}
 }
 
 async def set_setting(key: str, value: str):
@@ -77,8 +48,8 @@ async def get_setting(key: str):
             return row[0] if row else None
 
 async def check_and_apply_weekly_reset():
-    year, week, _ = datetime.now().isocalendar()
-    current_week_key = f"{year}_{week}"
+    """Автоматический сброс доп. бонусов при наступлении новой недели (воскресенье 00:00)"""
+    current_week_key = datetime.now().strftime("%Y_%U")
     
     last_week_key = await get_setting("last_bonus_reset_week")
     if last_week_key != current_week_key:
@@ -114,20 +85,36 @@ async def init_db():
         """)
         await db.commit()
 
+        # Инициализация 40 пустых слотов (4 волны × 10 строк) со значениями NULL
         async with db.execute("SELECT COUNT(*) FROM slots") as cursor:
             count = (await cursor.fetchone())[0]
             if count == 0:
-                for wave_id, wave_info in WAVES_DATA.items():
-                    for idx, row in enumerate(wave_info["rows"]):
+                for wave_id in range(1, 5):
+                    for idx in range(10):
                         await db.execute(
                             """INSERT INTO slots 
-                               (wave_id, row_index, top1_boss, top2_boss, username) 
-                               VALUES (?, ?, ?, ?, ?)""",
-                            (wave_id, idx, row["top1"], row["top2"], row["u"])
+                               (wave_id, row_index, top1_boss, top2_boss, user_id, username) 
+                               VALUES (?, ?, NULL, NULL, NULL, NULL)""",
+                            (wave_id, idx)
                         )
                 await db.commit()
 
     await check_and_apply_weekly_reset()
+
+async def get_taken_bosses(wave_id: int) -> set:
+    """Возвращает множество локаций/боссов, забронированных в текущей волне"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        async with db.execute(
+            """SELECT top1_boss, top2_boss FROM slots 
+               WHERE wave_id = ? AND (username IS NOT NULL OR user_id IS NOT NULL)""", 
+            (wave_id,)
+        ) as cursor:
+            taken = set()
+            rows = await cursor.fetchall()
+            for r in rows:
+                if r[0]: taken.add(r[0])
+                if r[1]: taken.add(r[1])
+            return taken
 
 async def get_wave_slots(wave_id: int):
     async with aiosqlite.connect(DATABASE_NAME) as db:
@@ -150,7 +137,7 @@ async def get_user_max_limit(username: str) -> int:
     uname = f"@{username}" if username and not username.startswith("@") else username
     async with aiosqlite.connect(DATABASE_NAME) as db:
         async with db.execute(
-            "SELECT extra_slots FROM user_limits WHERE LOWER(username) = LOWER(?)", (uname,)
+            "SELECT extra_slots FROM user_limits WHERE LOWER(username) = LOWER(?)" , (uname,)
         ) as c:
             row = await c.fetchone()
             extra = row[0] if row else 0
@@ -177,61 +164,100 @@ async def get_user_reservations_count(user_id: int, username: str) -> int:
         ) as c:
             return (await c.fetchone())[0]
 
-async def toggle_slot(wave_id: int, row_index: int, user_id: int, username: str):
+async def reserve_slot_with_bosses(wave_id: int, row_index: int, user_id: int, username: str, top1: str, top2: str):
+    """Запись пользователя в слот с выбранными боссами ТОП-1 и ТОП-2"""
     await check_and_apply_weekly_reset()
     uname = f"@{username}" if username and not username.startswith("@") else (username or "Игрок")
-    
+
     async with aiosqlite.connect(DATABASE_NAME) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
-            "SELECT * FROM slots WHERE wave_id = ? AND row_index = ?",
-            (wave_id, row_index)
+            "SELECT * FROM slots WHERE wave_id = ? AND row_index = ?", (wave_id, row_index)
         ) as cursor:
             slot = await cursor.fetchone()
 
         if not slot:
-            return False, "Слот не найден", False
-
-        if slot["user_id"] == user_id or (slot["username"] and slot["username"].lower() == uname.lower()):
-            await db.execute(
-                "UPDATE slots SET user_id = NULL, username = NULL WHERE id = ?", (slot["id"],)
-            )
-            await db.commit()
-            return True, "Запись отменена (слот освобожден)", False
+            return False, "Слот не найден"
 
         if slot["username"] or slot["user_id"]:
-            return False, f"Слот занят игроком {slot['username']}", True
+            return False, f"Слот уже занят игроком {slot['username']}"
 
+        # Проверка лимита броней
         max_limit = await get_user_max_limit(uname)
         count = await get_user_reservations_count(user_id, uname)
         if count >= max_limit:
-            return False, f"У вас уже {count}/{max_limit} броней!", False
+            return False, f"У вас уже {count}/{max_limit} броней!"
+
+        # Проверка дубликатов занятых боссов в этой же волне
+        taken = await get_taken_bosses(wave_id)
+        if top1 in taken:
+            return False, f"Босс «{top1}» уже занят другом сокланом!"
+        if top2 in taken:
+            return False, f"Босс «{top2}» уже занят другом сокланом!"
 
         await db.execute(
-            "UPDATE slots SET user_id = ?, username = ? WHERE id = ?", (user_id, uname, slot["id"])
+            """UPDATE slots 
+               SET user_id = ?, username = ?, top1_boss = ?, top2_boss = ? 
+               WHERE id = ?""",
+            (user_id, uname, top1, top2, slot["id"])
         )
         await db.commit()
-        return True, "Вы успешно записаны!", False
+        
+        top1_emoji = LOCATIONS_EMOJI.get(top1, "")
+        top2_emoji = LOCATIONS_EMOJI.get(top2, "")
+        return True, f"Вы успешно записаны!\nТОП-1: {top1_emoji} {top1}\nТОП-2: {top2_emoji} {top2}"
 
-async def admin_assign_slot(wave_id: int, row_index: int, username_text: str):
-    """Принудительная запись любого текста/хэштега админом"""
+async def release_slot(wave_id: int, row_index: int, user_id: int, username: str):
+    """Отмена брони и очистка выбранных боссов"""
+    uname = f"@{username}" if username and not username.startswith("@") else (username or "Игрок")
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM slots WHERE wave_id = ? AND row_index = ?", (wave_id, row_index)
+        ) as cursor:
+            slot = await cursor.fetchone()
+
+        if not slot:
+            return False, "Слот не найден"
+
+        if slot["user_id"] == user_id or (slot["username"] and slot["username"].lower() == uname.lower()):
+            await db.execute(
+                """UPDATE slots 
+                   SET user_id = NULL, username = NULL, top1_boss = NULL, top2_boss = NULL 
+                   WHERE id = ?""", 
+                (slot["id"],)
+            )
+            await db.commit()
+            return True, "Запись отменена (слот освобожден)"
+        return False, "Вы не можете отменить чужую запись"
+
+async def admin_assign_slot(wave_id: int, row_index: int, username_text: str, top1: str = "Немалая смелость", top2: str = "Хозяин зеркал"):
+    """Принудительная запись администратором"""
     uname = username_text.strip()
     async with aiosqlite.connect(DATABASE_NAME) as db:
         await db.execute(
-            "UPDATE slots SET user_id = NULL, username = ? WHERE wave_id = ? AND row_index = ?",
-            (uname, wave_id, row_index)
+            """UPDATE slots 
+               SET user_id = NULL, username = ?, top1_boss = ?, top2_boss = ? 
+               WHERE wave_id = ? AND row_index = ?""",
+            (uname, top1, top2, wave_id, row_index)
         )
         await db.commit()
 
 async def admin_force_free_slot(wave_id: int, row_index: int):
+    """Принудительное освобождение слота администратором"""
     async with aiosqlite.connect(DATABASE_NAME) as db:
         await db.execute(
-            "UPDATE slots SET user_id = NULL, username = NULL WHERE wave_id = ? AND row_index = ?",
+            """UPDATE slots 
+               SET user_id = NULL, username = NULL, top1_boss = NULL, top2_boss = NULL 
+               WHERE wave_id = ? AND row_index = ?""",
             (wave_id, row_index)
         )
         await db.commit()
 
 async def reset_all_slots():
+    """Полный сброс всех 40 слотов"""
     async with aiosqlite.connect(DATABASE_NAME) as db:
-        await db.execute("UPDATE slots SET user_id = NULL, username = NULL")
+        await db.execute(
+            "UPDATE slots SET user_id = NULL, username = NULL, top1_boss = NULL, top2_boss = NULL"
+        )
         await db.commit()
