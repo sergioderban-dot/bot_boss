@@ -101,20 +101,12 @@ async def init_db():
 
     await check_and_apply_weekly_reset()
 
-async def get_taken_bosses(wave_id: int) -> set:
-    """Возвращает множество локаций/боссов, забронированных в текущей волне"""
+async def get_taken_bosses(wave_id: int, position: str) -> list:
+    """Ищет занятые локации строго в одной указанной колонке (top1_boss или top2_boss)"""
+    col = "top1_boss" if position == "top1" else "top2_boss"
     async with aiosqlite.connect(DATABASE_NAME) as db:
-        async with db.execute(
-            """SELECT top1_boss, top2_boss FROM slots 
-               WHERE wave_id = ? AND (username IS NOT NULL OR user_id IS NOT NULL)""", 
-            (wave_id,)
-        ) as cursor:
-            taken = set()
-            rows = await cursor.fetchall()
-            for r in rows:
-                if r[0]: taken.add(r[0])
-                if r[1]: taken.add(r[1])
-            return taken
+        async with db.execute(f"SELECT {col} FROM slots WHERE wave_id = ? AND {col} IS NOT NULL", (wave_id,)) as cursor:
+            return [row[0] for row in await cursor.fetchall()]
 
 async def get_wave_slots(wave_id: int):
     async with aiosqlite.connect(DATABASE_NAME) as db:
@@ -137,7 +129,7 @@ async def get_user_max_limit(username: str) -> int:
     uname = f"@{username}" if username and not username.startswith("@") else username
     async with aiosqlite.connect(DATABASE_NAME) as db:
         async with db.execute(
-            "SELECT extra_slots FROM user_limits WHERE LOWER(username) = LOWER(?)" , (uname,)
+            "SELECT extra_slots FROM user_limits WHERE LOWER(username) = LOWER(?)", (uname,)
         ) as c:
             row = await c.fetchone()
             extra = row[0] if row else 0
@@ -188,12 +180,14 @@ async def reserve_slot_with_bosses(wave_id: int, row_index: int, user_id: int, u
         if count >= max_limit:
             return False, f"У вас уже {count}/{max_limit} броней!"
 
-        # Проверка дубликатов занятых боссов в этой же волне
-        taken = await get_taken_bosses(wave_id)
-        if top1 in taken:
-            return False, f"Босс «{top1}» уже занят другом сокланом!"
-        if top2 in taken:
-            return False, f"Босс «{top2}» уже занят другом сокланом!"
+        # Проверка дубликатов занятых боссов в этой же волне по соответствующим колонкам
+        taken_top1 = await get_taken_bosses(wave_id, "top1")
+        taken_top2 = await get_taken_bosses(wave_id, "top2")
+
+        if top1 in taken_top1:
+            return False, f"Босс «{top1}» уже занят в ТОП-1 другом сокланом!"
+        if top2 in taken_top2:
+            return False, f"Босс «{top2}» уже занят в ТОП-2 другом сокланом!"
 
         await db.execute(
             """UPDATE slots 

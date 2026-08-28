@@ -110,8 +110,8 @@ def build_grid_keyboard(active_wave: int, slots: list) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def build_boss_keyboard(wave_id: int, taken_bosses: set, callback_prefix: str, exclude_boss: str = None) -> InlineKeyboardMarkup:
-    """Генерация клавиатуры выбора боссов (разделение Т1 пользователя, занятых боссов и свободных локаций)"""
+def build_boss_keyboard(wave_id: int, taken_bosses: list, callback_prefix: str, exclude_boss: str = None) -> InlineKeyboardMarkup:
+    """Генерация клавиатуры выбора боссов с изоляцией колонок ТОП-1 и ТОП-2"""
     builder = InlineKeyboardBuilder()
     buttons = []
     
@@ -257,7 +257,7 @@ async def cb_switch_wave(callback: types.CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "noop_taken")
 async def cb_noop_taken(callback: types.CallbackQuery):
-    await callback.answer("🔒 Этот босс уже забронирован другим сокланом в этой волне!", show_alert=True)
+    await callback.answer("🔒 Этот босс уже забронирован другим сокланом в этой категории!", show_alert=True)
 
 
 @dp.callback_query(F.data == "noop_selected")
@@ -343,14 +343,14 @@ async def start_wizard_top1(callback: types.CallbackQuery, state: FSMContext, wa
     await state.set_state(SelectionWizard.selecting_top1)
     await state.update_data(wave_id=wave_id, row_index=row_index)
 
-    taken_bosses = await get_taken_bosses(wave_id)
-    reply_markup = build_boss_keyboard(wave_id, taken_bosses, callback_prefix="wiz_top1")
+    taken_top1 = await get_taken_bosses(wave_id, "top1")
+    reply_markup = build_boss_keyboard(wave_id, taken_top1, callback_prefix="wiz_top1")
 
     await callback.message.edit_text(
         f"⚔️ <b>ШАГ 1: ВЫБОР БОССА ТОП-1</b>\n"
         f"🌊 <b>Волна {wave_id}</b> (Слот #{row_index + 1})\n\n"
         f"👇 <i>Выберите первого доступного босса:</i>\n"
-        f"🔒 — <i>боссы, уже забронированные в этой волне</i>",
+        f"🔒 — <i>боссы, уже забронированные в ТОП-1 этой волны</i>",
         reply_markup=reply_markup,
         parse_mode="HTML"
     )
@@ -367,8 +367,8 @@ async def cb_wiz_top1_select(callback: types.CallbackQuery, state: FSMContext):
     await state.update_data(top1_boss=top1_boss)
     await state.set_state(SelectionWizard.selecting_top2)
 
-    taken_bosses = await get_taken_bosses(wave_id)
-    reply_markup = build_boss_keyboard(wave_id, taken_bosses, callback_prefix="wiz_top2", exclude_boss=top1_boss)
+    taken_top2 = await get_taken_bosses(wave_id, "top2")
+    reply_markup = build_boss_keyboard(wave_id, taken_top2, callback_prefix="wiz_top2", exclude_boss=top1_boss)
 
     top1_emoji = LOCATIONS_EMOJI.get(top1_boss, "")
 
