@@ -608,6 +608,10 @@ async def set_bot_commands(bot_instance: Bot):
 async def lifespan(app: FastAPI):
     await init_db()
     await set_bot_commands(bot)
+    
+    # Принудительно отвязываем вебхук
+    await bot.delete_webhook(drop_pending_updates=True)
+    
     polling_task = asyncio.create_task(dp.start_polling(bot))
     yield
     polling_task.cancel()
